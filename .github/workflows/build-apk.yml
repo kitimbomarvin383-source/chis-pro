@@ -3,7 +3,6 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,10 +18,10 @@ jobs:
           channel: 'stable'
       - run: flutter pub get
       - run: rm -rf android
-      - run: flutter create . --project-name chis_pro --org com.chispro.app --platforms android
+      - run: flutter create . --project-name christok --org com.christok.app --platforms android
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: chis-pro-apk
+          name: christok-apk
           path: build/app/outputs/flutter-apk/app-release.apk
