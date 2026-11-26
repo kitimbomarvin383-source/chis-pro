@@ -24,12 +24,13 @@ class VideoItem {
   VideoItem(this.url, this.user, this.caption, this.song, this.likes, this.comments);
 }
 
+// FAST V2: Small 360p 1MB videos - load in 2 secs even on slow MTN/Airtel
 final videos = [
-  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "@funny_kampala", "Funny 😂 Wait for it... #uganda #funny", "Original Sound - funny_kampala", 12400, 342),
-  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4", "@dance_queen256", "New dance challenge 🔥 Try it! #dance #viral", "Afrobeats Mix - DJ Sema", 45200, 1204),
-  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "@football_daily", "Best goal this week! ⚽️ #football #sports", "Sports Beat - Football Daily", 8900, 213),
-  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", "@ug_music", "New Ugandan music video 🎵 #music #ug", "New Hit - UG Music", 67300, 2890),
-  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", "@comedy_central256", "When your mum catches you 😂 #comedy", "Comedy Sound - Central256", 23100, 876),
+  VideoItem("https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4", "@funny_kampala", "Funny 😂 Wait for it... #uganda #funny", "Original Sound - funny_kampala", 12400, 342),
+  VideoItem("https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4", "@dance_queen256", "New dance challenge 🔥 Try it! #dance #viral", "Afrobeats Mix - DJ Sema", 45200, 1204),
+  VideoItem("https://test-videos.co.uk/vids/tears-of-steel/mp4/h264/360/Tears_Of_Steel_360_10s_1MB.mp4", "@football_daily", "Best goal this week! ⚽️ #football #sports", "Sports Beat - Football Daily", 8900, 213),
+  VideoItem("https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4", "@ug_music", "New Ugandan music video 🎵 #music #ug", "New Hit - UG Music", 67300, 2890),
+  VideoItem("https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4", "@comedy_central256", "When your mum catches you 😂 #comedy", "Comedy Sound - Central256", 23100, 876),
 ];
 
 class ChrisTokHome extends StatefulWidget {
@@ -77,52 +78,83 @@ class VideoFeed extends StatefulWidget {
 class _VideoFeedState extends State<VideoFeed> {
   late PageController _pageController;
   int _current = 0;
+  Map<int, VideoPlayerController> _controllers = {};
+
   @override
-  void initState() { super.initState(); _pageController = PageController(); }
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+    _ensureController(0);
+    _ensureController(1);
+  }
+
+  void _ensureController(int index) async {
+    if (index < 0 || index >= videos.length) return;
+    if (_controllers.containsKey(index)) return;
+    final c = VideoPlayerController.networkUrl(Uri.parse(videos[index].url));
+    _controllers[index] = c;
+    await c.initialize();
+    c.setLooping(true);
+    c.setVolume(1.0);
+    if (index == _current) c.play();
+    if (mounted) setState(() {});
+  }
+
+  void _onPageChanged(int i) {
+    setState(() => _current = i);
+    _controllers.forEach((key, c) {
+      if (key == i) c.play(); else c.pause();
+    });
+    _ensureController(i + 1);
+    // Free memory: dispose videos far away
+    _controllers.keys.where((k) => (k - i).abs() > 1).toList().forEach((k) {
+      _controllers[k]?.dispose();
+      _controllers.remove(k);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controllers.forEach((_, c) => c.dispose());
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         SafeArea(child: Padding(padding: EdgeInsets.all(12), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text("Following", style: TextStyle(color: Colors.grey)), SizedBox(width: 20), Text("For You", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Text("  •  ChrisTok", style: TextStyle(color: Colors.pink, fontWeight: FontWeight.bold))]))),
-        Expanded(child: PageView.builder(scrollDirection: Axis.vertical, itemCount: videos.length, onPageChanged: (i) => setState(() => _current = i), itemBuilder: (context, index) => VideoCard(video: videos[index], isActive: index == _current))),
+        Expanded(child: PageView.builder(scrollDirection: Axis.vertical, itemCount: videos.length, controller: _pageController, onPageChanged: _onPageChanged, itemBuilder: (context, index) => VideoCard(video: videos[index], controller: _controllers[index], isActive: index == _current))),
       ],
     );
   }
 }
 
 class VideoCard extends StatefulWidget {
-  final VideoItem video; final bool isActive;
-  VideoCard({required this.video, required this.isActive});
+  final VideoItem video;
+  final VideoPlayerController? controller;
+  final bool isActive;
+  VideoCard({required this.video, required this.controller, required this.isActive});
   @override
   _VideoCardState createState() => _VideoCardState();
 }
 
 class _VideoCardState extends State<VideoCard> {
-  VideoPlayerController? _ctrl;
   bool _liked = false;
   bool _showHeart = false;
   late int _likeCount;
   @override
-  void initState() { super.initState(); _likeCount = widget.video.likes; _init(); }
-  void _init() async {
-    _ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.video.url));
-    await _ctrl!.initialize();
-    _ctrl!.setLooping(true);
-    if (widget.isActive) _ctrl!.play();
-    setState(() {});
-  }
-  @override
-  void didUpdateWidget(old) { super.didUpdateWidget(old); if (widget.isActive) _ctrl?.play(); else _ctrl?.pause(); }
-  @override
-  void dispose() { _ctrl?.dispose(); super.dispose(); }
-  void _toggleLike() { setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; if (_liked) { _showHeart = true; Future.delayed(Duration(milliseconds: 600), () => setState(() => _showHeart = false)); } }); }
+  void initState() { super.initState(); _likeCount = widget.video.likes; }
+  void _toggleLike() { setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; if (_liked) { _showHeart = true; Future.delayed(Duration(milliseconds: 600), () { if (mounted) setState(() => _showHeart = false); }); } }); }
   @override
   Widget build(BuildContext context) {
+    final c = widget.controller;
+    final ready = c != null && c.value.isInitialized;
     return GestureDetector(
       onDoubleTap: () { if (!_liked) _toggleLike(); },
-      onTap: () { if (_ctrl!.value.isPlaying) _ctrl!.pause(); else _ctrl!.play(); setState(() {}); },
+      onTap: () { if (ready) { if (c.value.isPlaying) c.pause(); else c.play(); setState(() {}); } },
       child: Stack(children: [
-        Container(color: Colors.black, child: _ctrl != null && _ctrl!.value.isInitialized ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: _ctrl!.value.size.width, height: _ctrl!.value.size.height, child: VideoPlayer(_ctrl!)))) : Center(child: CircularProgressIndicator(color: Colors.pink))),
+        Container(color: Colors.black, child: ready ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: c.value.size.width, height: c.value.size.height, child: VideoPlayer(c)))) : Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(color: Colors.pink), SizedBox(height: 10), Text("Loading fast... ChrisTok", style: TextStyle(color: Colors.white70))]))),
         if (_showHeart) Center(child: Icon(Icons.favorite, size: 120, color: Colors.pink.withOpacity(0.9))),
         Positioned(right: 12, bottom: 100, child: Column(children: [
           CircleAvatar(radius: 24, child: Text(widget.video.user[1].toUpperCase(), style: TextStyle(fontSize: 20))),
