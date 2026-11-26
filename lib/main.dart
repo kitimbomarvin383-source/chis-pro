@@ -24,13 +24,13 @@ class VideoItem {
   VideoItem(this.url, this.user, this.caption, this.song, this.likes, this.comments);
 }
 
-// FAST V2: Small 360p 1MB videos - load in 2 secs even on slow MTN/Airtel
+// V3: ONLY Google CDN - works in Uganda, no blocked servers
 final videos = [
-  VideoItem("https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4", "@funny_kampala", "Funny 😂 Wait for it... #uganda #funny", "Original Sound - funny_kampala", 12400, 342),
-  VideoItem("https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4", "@dance_queen256", "New dance challenge 🔥 Try it! #dance #viral", "Afrobeats Mix - DJ Sema", 45200, 1204),
-  VideoItem("https://test-videos.co.uk/vids/tears-of-steel/mp4/h264/360/Tears_Of_Steel_360_10s_1MB.mp4", "@football_daily", "Best goal this week! ⚽️ #football #sports", "Sports Beat - Football Daily", 8900, 213),
-  VideoItem("https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4", "@ug_music", "New Ugandan music video 🎵 #music #ug", "New Hit - UG Music", 67300, 2890),
-  VideoItem("https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4", "@comedy_central256", "When your mum catches you 😂 #comedy", "Comedy Sound - Central256", 23100, 876),
+  VideoItem("https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4", "@funny_kampala", "Funny 😂 Wait for it... #uganda #funny", "Original Sound - funny_kampala", 12400, 342),
+  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "@dance_queen256", "New dance challenge 🔥 Try it! #dance #viral", "Afrobeats Mix - DJ Sema", 45200, 1204),
+  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "@football_daily", "Best goal this week! ⚽️ #football #sports", "Sports Beat - Football Daily", 8900, 213),
+  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", "@ug_music", "New Ugandan music video 🎵 #music #ug", "New Hit - UG Music", 67300, 2890),
+  VideoItem("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", "@comedy_central256", "When your mum catches you 😂 #comedy", "Comedy Sound - Central256", 23100, 876),
 ];
 
 class ChrisTokHome extends StatefulWidget {
@@ -79,6 +79,7 @@ class _VideoFeedState extends State<VideoFeed> {
   late PageController _pageController;
   int _current = 0;
   Map<int, VideoPlayerController> _controllers = {};
+  Map<int, String> _errors = {};
 
   @override
   void initState() {
@@ -93,38 +94,41 @@ class _VideoFeedState extends State<VideoFeed> {
     if (_controllers.containsKey(index)) return;
     final c = VideoPlayerController.networkUrl(Uri.parse(videos[index].url));
     _controllers[index] = c;
-    await c.initialize();
-    c.setLooping(true);
-    c.setVolume(1.0);
-    if (index == _current) c.play();
+    try {
+      await c.initialize();
+      c.setLooping(true);
+      c.setVolume(1.0);
+      if (index == _current) c.play();
+    } catch (e) {
+      _errors[index] = e.toString();
+    }
     if (mounted) setState(() {});
+  }
+
+  void _retry(int index) {
+    _controllers[index]?.dispose();
+    _controllers.remove(index);
+    _errors.remove(index);
+    setState(() {});
+    _ensureController(index);
   }
 
   void _onPageChanged(int i) {
     setState(() => _current = i);
-    _controllers.forEach((key, c) {
-      if (key == i) c.play(); else c.pause();
-    });
+    _controllers.forEach((key, c) { if (key == i) c.play(); else c.pause(); });
     _ensureController(i + 1);
-    // Free memory: dispose videos far away
-    _controllers.keys.where((k) => (k - i).abs() > 1).toList().forEach((k) {
-      _controllers[k]?.dispose();
-      _controllers.remove(k);
-    });
+    _controllers.keys.where((k) => (k - i).abs() > 1).toList().forEach((k) { _controllers[k]?.dispose(); _controllers.remove(k); });
   }
 
   @override
-  void dispose() {
-    _controllers.forEach((_, c) => c.dispose());
-    super.dispose();
-  }
+  void dispose() { _controllers.forEach((_, c) => c.dispose()); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         SafeArea(child: Padding(padding: EdgeInsets.all(12), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text("Following", style: TextStyle(color: Colors.grey)), SizedBox(width: 20), Text("For You", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Text("  •  ChrisTok", style: TextStyle(color: Colors.pink, fontWeight: FontWeight.bold))]))),
-        Expanded(child: PageView.builder(scrollDirection: Axis.vertical, itemCount: videos.length, controller: _pageController, onPageChanged: _onPageChanged, itemBuilder: (context, index) => VideoCard(video: videos[index], controller: _controllers[index], isActive: index == _current))),
+        Expanded(child: PageView.builder(scrollDirection: Axis.vertical, itemCount: videos.length, controller: _pageController, onPageChanged: _onPageChanged, itemBuilder: (context, index) => VideoCard(video: videos[index], controller: _controllers[index], error: _errors[index], isActive: index == _current, onRetry: () => _retry(index)))),
       ],
     );
   }
@@ -133,8 +137,10 @@ class _VideoFeedState extends State<VideoFeed> {
 class VideoCard extends StatefulWidget {
   final VideoItem video;
   final VideoPlayerController? controller;
+  final String? error;
   final bool isActive;
-  VideoCard({required this.video, required this.controller, required this.isActive});
+  final VoidCallback onRetry;
+  VideoCard({required this.video, required this.controller, required this.error, required this.isActive, required this.onRetry});
   @override
   _VideoCardState createState() => _VideoCardState();
 }
@@ -154,14 +160,14 @@ class _VideoCardState extends State<VideoCard> {
       onDoubleTap: () { if (!_liked) _toggleLike(); },
       onTap: () { if (ready) { if (c.value.isPlaying) c.pause(); else c.play(); setState(() {}); } },
       child: Stack(children: [
-        Container(color: Colors.black, child: ready ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: c.value.size.width, height: c.value.size.height, child: VideoPlayer(c)))) : Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(color: Colors.pink), SizedBox(height: 10), Text("Loading fast... ChrisTok", style: TextStyle(color: Colors.white70))]))),
+        Container(color: Colors.black, child: ready ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: c.value.size.width, height: c.value.size.height, child: VideoPlayer(c)))) : Center(child: widget.error != null ? Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.wifi_off, size: 40, color: Colors.white), SizedBox(height: 10), Text("No internet / Server blocked", style: TextStyle(color: Colors.white)), SizedBox(height: 10), ElevatedButton(onPressed: widget.onRetry, child: Text("Tap to Retry"))]) : Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(color: Colors.pink), SizedBox(height: 10), Text("Loading... ChrisTok", style: TextStyle(color: Colors.white70))]))),
         if (_showHeart) Center(child: Icon(Icons.favorite, size: 120, color: Colors.pink.withOpacity(0.9))),
         Positioned(right: 12, bottom: 100, child: Column(children: [
           CircleAvatar(radius: 24, child: Text(widget.video.user[1].toUpperCase(), style: TextStyle(fontSize: 20))),
           SizedBox(height: 16),
           GestureDetector(onTap: _toggleLike, child: Column(children: [Icon(_liked ? Icons.favorite : Icons.favorite_border, color: _liked ? Colors.pink : Colors.white, size: 32), Text("$_likeCount")])),
           SizedBox(height: 16),
-          GestureDetector(onTap: () => showModalBottomSheet(context: context, builder: (_) => Container(padding: EdgeInsets.all(16), height: 300, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text("${widget.video.comments} Comments", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), SizedBox(height: 12), ListTile(leading: CircleAvatar(child: Text("J")), title: Text("Joel"), subtitle: Text("This is so funny 😂🔥")), ListTile(leading: CircleAvatar(child: Text("A")), title: Text("Amina"), subtitle: Text("ChrisTok is the best!"))]))), child: Column(children: [Icon(Icons.comment, size: 32), Text("${widget.video.comments}")])),
+          Column(children: [Icon(Icons.comment, size: 32), Text("${widget.video.comments}")] ),
           SizedBox(height: 16),
           Column(children: [Icon(Icons.share, size: 32), Text("Share")]),
         ])),
